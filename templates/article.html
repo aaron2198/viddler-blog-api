@@ -1,0 +1,11 @@
+{{define "article"}}
+<h1 class="ql-align-center" >{{.Title}}</h1>
+<br>
+<img src="{{.Thumbnail}}" alt="{{.Title}}">
+<br>
+{{range .Sections}}
+<h1>{{.Title}}</h1>
+<p><span class="ql-size-large">{{.Content}}</span></p>
+<br>
+{{end}}
+{{end}}
