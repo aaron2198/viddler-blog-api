@@ -122,3 +122,11 @@ func DownloadVideoMetadata(videoID string, outputDir string) (string, error) {
 
 	return outputPath, nil
 }
+
+func GetChapterStartTimes(chapters []Chapter) []float64 {
+	flattened := make([]float64, 0)
+	for _, chapter := range chapters {
+		flattened = append(flattened, chapter.StartTime)
+	}
+	return flattened
+}

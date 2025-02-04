@@ -58,6 +58,14 @@ type VideoMetadata struct {
 	AudioChannels  int      `json:"audio_channels"`
 	Type           string   `json:"_type"`
 	Formats        []Format `json:"formats"`
+
+	Chapters []Chapter `json:"chapters"`
+}
+
+type Chapter struct {
+	StartTime float64 `json:"start_time"`
+	EndTime   float64 `json:"end_time"`
+	Title     string  `json:"title"`
 }
 
 type Format struct {

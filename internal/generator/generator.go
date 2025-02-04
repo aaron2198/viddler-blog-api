@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"html/template"
 	"io"
+	"strings"
 	"sync"
 
 	"gitlab.aaronhess.xyz/viddler/viddler-blog-api/internal/aiservice"
@@ -21,6 +22,7 @@ type UserProvidedOptions struct {
 	UserStylePrompt      string
 	Client               string
 	Model                string
+	ChaptersAsSections   bool
 	EnablePhases         bool
 	SelectedPhaseOptions aiservice.TemplatePhaseMap
 }
@@ -28,14 +30,20 @@ type UserProvidedOptions struct {
 type ArticleGenerator struct {
 	Config               *ArticleGeneratorConfig
 	BucketStore          *bucket.BucketStore
-	SRT                  *srt.SRT
+	Video                *Video
 	Phases               aiservice.BuiltPhaseMap
 	Progress             chan any
 	Complete             chan struct{}
 	Options              *UserProvidedOptions
-	videoID              string
 	Result               *ArticleResult
 	PhaseBasedGeneration *aiservice.PhaseBasedGeneration
+}
+
+type Video struct {
+	Id       string
+	Url      string
+	Metadata ytdlp.VideoMetadata
+	SRT      *srt.SRT
 }
 
 type ArticleGeneratorConfig struct {
@@ -72,6 +80,9 @@ func New(params *ArticleGeneratorParams) *ArticleGenerator {
 		Phases:               make(aiservice.BuiltPhaseMap),
 		PhaseBasedGeneration: &aiservice.PhaseBasedGeneration{},
 		Result:               &ArticleResult{},
+	}
+	ag.Video = &Video{
+		Url: params.Options.VideoUrl,
 	}
 	ag.WithCustomPhases(DefaultPhases)
 	if len(ag.Options.SelectedPhaseOptions) > 0 {
@@ -120,7 +131,7 @@ func (ag *ArticleGenerator) GetClient(client, model string) aiservice.Client {
 }
 
 func (ag *ArticleGenerator) GenerateArticle() (html string, err error) {
-	ag.videoID, err = ytdlp.ParseVideoID(ag.Options.VideoUrl)
+	ag.Video.Id, err = ytdlp.ParseVideoID(ag.Options.VideoUrl)
 	if err != nil {
 		return "", fmt.Errorf("failed to parse video ID: %s", err)
 	}
@@ -154,9 +165,9 @@ func (ag *ArticleGenerator) GenerateArticle() (html string, err error) {
 }
 
 func (ag *ArticleGenerator) StoreTranscript(ctx context.Context) (key string, err error) {
-	key = ag.Config.SubtitlesPath + ag.videoID + ".en.srt"
+	key = ag.Config.SubtitlesPath + ag.Video.Id + ".en.srt"
 	if exists, err := ag.BucketStore.ObjectExists(ctx, key); err != nil || !exists {
-		subtitlePath, err := ytdlp.DownloadSubtitles(ag.videoID, "/tmp/subtitles")
+		subtitlePath, err := ytdlp.DownloadSubtitles(ag.Video.Id, "/tmp/subtitles")
 		if err != nil {
 			return "", fmt.Errorf("failed to download subtitles: %s", err)
 		}
@@ -169,9 +180,9 @@ func (ag *ArticleGenerator) StoreTranscript(ctx context.Context) (key string, er
 }
 
 func (ag *ArticleGenerator) StoreThumbnail(ctx context.Context) (key string, err error) {
-	key = ag.Config.ThumbnailsPath + ag.videoID + ".jpg"
+	key = ag.Config.ThumbnailsPath + ag.Video.Id + ".jpg"
 	if exists, err := ag.BucketStore.ObjectExists(ctx, key); err != nil || !exists {
-		thumbnailPath, err := ytdlp.DownloadThumbnail(ag.videoID, "/tmp/thumbnails")
+		thumbnailPath, err := ytdlp.DownloadThumbnail(ag.Video.Id, "/tmp/thumbnails")
 		if err != nil {
 			return "", fmt.Errorf("failed to download thumbnail: %s", err)
 		}
@@ -184,9 +195,9 @@ func (ag *ArticleGenerator) StoreThumbnail(ctx context.Context) (key string, err
 }
 
 func (ag *ArticleGenerator) StoreMetadata(ctx context.Context) (key string, err error) {
-	key = ag.Config.MetadataPath + ag.videoID + ".info.json"
+	key = ag.Config.MetadataPath + ag.Video.Id + ".info.json"
 	if exists, err := ag.BucketStore.ObjectExists(ctx, key); err != nil || !exists {
-		metadataPath, err := ytdlp.DownloadVideoMetadata(ag.videoID, "/tmp/metadata")
+		metadataPath, err := ytdlp.DownloadVideoMetadata(ag.Video.Id, "/tmp/metadata")
 		if err != nil {
 			return "", fmt.Errorf("failed to download metadata: %s", err)
 		}
@@ -226,9 +237,10 @@ func (ag *ArticleGenerator) Setup() error {
 		return fmt.Errorf("failed to get metadata: %s", err)
 	}
 
-	//Find Title
+	//Store Metadata
 	var metadata ytdlp.VideoMetadata
 	json.Unmarshal([]byte(metadataString), &metadata)
+	ag.Video.Metadata = metadata
 	ag.Result.Title = metadata.FullTitle
 
 	//Parse Transcript
@@ -236,9 +248,9 @@ func (ag *ArticleGenerator) Setup() error {
 	if err != nil {
 		return fmt.Errorf("failed to get subtitles: %s", err)
 	}
-	ag.SRT = srt.Parse(srtContent)
+	ag.Video.SRT = srt.Parse(srtContent)
 	//Clean up duplicates and empty entries
-	ag.SRT.Cleanse()
+	ag.Video.SRT.Cleanse()
 
 	//Set Progress Channel
 	ag.ProgressPrinter()
@@ -253,7 +265,15 @@ func (ag *ArticleGenerator) ExecuteBasicGeneration() (string, error) {
 	if ag.Options.UserStylePrompt == "" {
 		ag.Options.UserStylePrompt = "generate an article based on the following transcript:\n"
 	}
-	content, err := client.BasicGenerate(ag.Options.UserStylePrompt, ag.SRT.String())
+	prefix := strings.Builder{}
+	if ag.Options.ChaptersAsSections && len(ag.Video.Metadata.Chapters) > 0 {
+		prefix.WriteString("Use the following list as section titles for an article:\n")
+		for _, chapter := range ag.Video.Metadata.Chapters {
+			prefix.WriteString(fmt.Sprintf("%s\n", chapter.Title))
+		}
+	}
+	prompt := prefix.String() + ag.Options.UserStylePrompt
+	content, err := client.BasicGenerate(prompt, ag.Video.SRT.String())
 	if err != nil {
 		return "", fmt.Errorf("failed to generate content: %s", err)
 	}
@@ -261,10 +281,27 @@ func (ag *ArticleGenerator) ExecuteBasicGeneration() (string, error) {
 }
 
 func (ag *ArticleGenerator) ExecutePhaseGeneration() error {
-	fmt.Println("Segmenting using: ", ag.Phases["segments"].String())
-	segmentsPhase, err := ag.SegmentPhase()
-	if err != nil {
-		return err
+	segmentsPhase := &aiservice.SegmentsPhase{}
+	var err error
+	if ag.Options.ChaptersAsSections && len(ag.Video.Metadata.Chapters) > 0 {
+		starts := ytdlp.GetChapterStartTimes(ag.Video.Metadata.Chapters)
+		fmt.Println(starts)
+		sectionIds := ag.Video.SRT.MapTimesToSections(starts)
+		fmt.Println(sectionIds)
+		fmt.Println(len(sectionIds))
+		fmt.Println(len(ag.Video.Metadata.Chapters))
+		for i, chapter := range ag.Video.Metadata.Chapters {
+			segmentsPhase.Segments = append(segmentsPhase.Segments, &aiservice.Segment{
+				Start: sectionIds[i],
+				Title: chapter.Title,
+			})
+		}
+	} else {
+		fmt.Println("Segmenting using: ", ag.Phases["segments"].String())
+		segmentsPhase, err = ag.SegmentPhase()
+		if err != nil {
+			return err
+		}
 	}
 	segmentsPhase.Segments = aiservice.ReorderSegments(segmentsPhase.Segments)
 	ag.Progress <- segmentsPhase
@@ -297,7 +334,7 @@ func (ag *ArticleGenerator) ExecutePhaseGeneration() error {
 
 func (ag *ArticleGenerator) SegmentPhase() (*aiservice.SegmentsPhase, error) {
 	prompt := ag.Options.SelectedPhaseOptions["segments"].UserPrompt
-	segments, err := ag.Phases["segments"].ArticleSegmentsPhase(prompt, ag.SRT)
+	segments, err := ag.Phases["segments"].ArticleSegmentsPhase(prompt, ag.Video.SRT)
 	if err != nil {
 		return nil, err
 	}
@@ -316,13 +353,13 @@ func (ag *ArticleGenerator) SegmentContentPhase(segmentsPhase *aiservice.Segment
 		next := &aiservice.Segment{}
 		if i == len(segmentsPhase.Segments)-1 {
 			next = &aiservice.Segment{
-				Start: len(ag.SRT.Items),
+				Start: len(ag.Video.SRT.Items),
 			}
 		} else {
 			next = segmentsPhase.Segments[i+1]
 		}
 		go func(segment, next *aiservice.Segment) {
-			dialogue := ag.SRT.ChunkOfDialogue(segment.Start, next.Start-1)
+			dialogue := ag.Video.SRT.ChunkOfDialogue(segment.Start, next.Start-1)
 			prompt := ag.Options.SelectedPhaseOptions["content"].UserPrompt
 			content, err := ag.Phases["content"].SegmentContentPhase(prompt, dialogue)
 			if err != nil {

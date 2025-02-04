@@ -225,3 +225,24 @@ func (srt *SRT) ChunkOfDialogue(start int, end int) string {
 	}
 	return dialogueBuilder.String()
 }
+
+func (srt *SRT) MapTimesToSections(times []float64) []int {
+	sections := make([]int, 0)
+	//first is always 0
+	sections = append(sections, 0)
+	remainingTimes := times[1:]
+	for _, time := range remainingTimes {
+		found := false
+		for j, item := range srt.Items {
+			if time >= item.StartSecond && time < srt.Items[j+1].StartSecond {
+				sections = append(sections, item.Number)
+				found = true
+				break
+			}
+		}
+		if !found {
+			sections = append(sections, -1) // Add sentinel value if no section found
+		}
+	}
+	return sections
+}
