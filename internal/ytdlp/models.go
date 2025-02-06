@@ -1,11 +1,14 @@
 package ytdlp
 
 type VideoMetadata struct {
-	ID             string `json:"id"`
-	Title          string `json:"title"`
-	FullTitle      string `json:"fulltitle"`
-	DisplayID      string `json:"display_id"`
-	DurationString string `json:"duration_string"`
+	ID             string   `json:"id"`
+	Title          string   `json:"title"`
+	FullTitle      string   `json:"fulltitle"`
+	DisplayID      string   `json:"display_id"`
+	DurationString string   `json:"duration_string"`
+	Categories     []string `json:"categories"`
+	Tags           []string `json:"tags"`
+	Description    string   `json:"description"`
 
 	// Channel and uploader information
 	Channel              string `json:"channel"`

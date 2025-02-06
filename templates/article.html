@@ -1,11 +1,52 @@
-{{define "article"}}
-<h1 class="ql-align-center" >{{.Title}}</h1>
-<br>
-<img src="{{.Thumbnail}}" alt="{{.Title}}">
-<br>
+{{define "article_prefix"}}
+    <h1 class="ql-align-center" >{{.Title}}</h1>
+    <h3 class="ql-align-center">
+        <a href="{{.UploaderUrl}}" rel="noopener noreferrer" target="_blank">{{.Uploader}}</a>
+    </h3>
+    <br>
+    {{if .Options.EmbedVideo}}
+        {{with .VideoId}}
+        <iframe class="ql-video ql-align-center" width="768" height="432" frameborder="0" allowfullscreen="true" src="https://www.youtube.com/embed/{{.}}?showinfo=0"></iframe>
+        {{end}}
+    {{else}}
+        <img src="{{.Thumbnail}}" alt="{{.Title}}">
+    {{end}}
+    {{if .Options.IncludeTags}}
+        <br>
+        <p class="ql-align-center">{{range .Tags}}#{{.}} {{end}}</p>
+    {{end}}
+    {{if .Options.IncludeDescription}}
+        {{with .Description}}
+        <br>
+        <blockquote>{{.}}</blockquote>
+        {{end}}
+    {{end}}
+    <br>
+{{end}}
+
+{{define "phase_article_body"}}
 {{range .Sections}}
 <h1>{{.Title}}</h1>
 <p><span class="ql-size-large">{{.Content}}</span></p>
 <br>
 {{end}}
+{{end}}
+
+{{define "basic_article_body"}}
+{{.RawBody}}
+{{end}}
+
+{{define "article_suffix"}}
+{{end}}
+
+{{define "phase_article"}}
+{{template "article_prefix" .}}
+{{template "phase_article_body" .}}
+{{template "article_suffix" .}}
+{{end}}
+
+{{define "basic_article"}}
+{{template "article_prefix" .}}
+{{template "basic_article_body" .}}
+{{template "article_suffix" .}}
 {{end}}

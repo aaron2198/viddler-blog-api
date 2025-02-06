@@ -5,8 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"html/template"
-	"io"
 	"strings"
 	"sync"
 
@@ -24,6 +22,9 @@ type UserProvidedOptions struct {
 	Model                string
 	ChaptersAsSections   bool
 	EnablePhases         bool
+	EmbedVideo           bool
+	IncludeDescription   bool
+	IncludeTags          bool
 	SelectedPhaseOptions aiservice.TemplatePhaseMap
 }
 
@@ -79,7 +80,9 @@ func New(params *ArticleGeneratorParams) *ArticleGenerator {
 		Complete:             make(chan struct{}, 1),
 		Phases:               make(aiservice.BuiltPhaseMap),
 		PhaseBasedGeneration: &aiservice.PhaseBasedGeneration{},
-		Result:               &ArticleResult{},
+		Result: &ArticleResult{
+			Options: params.Options,
+		},
 	}
 	ag.Video = &Video{
 		Url: params.Options.VideoUrl,
@@ -141,27 +144,31 @@ func (ag *ArticleGenerator) GenerateArticle() (html string, err error) {
 		return "", err
 	}
 
+	var buf bytes.Buffer
 	if ag.Options.EnablePhases {
 		if err := ag.ExecutePhaseGeneration(); err != nil {
 			ag.Complete <- struct{}{}
 			return "", fmt.Errorf("failed to generate AI content: %w", err)
 		}
-		var buf bytes.Buffer
-		if err := ag.Result.HTML(&buf); err != nil {
+		if err := ag.Result.HTML("phase_article", &buf); err != nil {
 			ag.Complete <- struct{}{}
 			return "", fmt.Errorf("failed to generate HTML: %w", err)
 		}
 		ag.Complete <- struct{}{}
-		return buf.String(), nil
 	} else {
 		content, err := ag.ExecuteBasicGeneration()
 		if err != nil {
 			ag.Complete <- struct{}{}
 			return "", fmt.Errorf("failed to generate AI content: %w", err)
 		}
-		prefix := ag.Result.PrefixForBasicGeneration()
-		return prefix + content, nil
+		ag.Result.Body = content
+		err = ag.Result.HTML("basic_article", &buf)
+		if err != nil {
+			ag.Complete <- struct{}{}
+			return "", fmt.Errorf("failed to generate HTML: %w", err)
+		}
 	}
+	return buf.String(), nil
 }
 
 func (ag *ArticleGenerator) StoreTranscript(ctx context.Context) (key string, err error) {
@@ -242,6 +249,13 @@ func (ag *ArticleGenerator) Setup() error {
 	json.Unmarshal([]byte(metadataString), &metadata)
 	ag.Video.Metadata = metadata
 	ag.Result.Title = metadata.FullTitle
+	ag.Result.VideoId = ag.Video.Id
+	ag.Result.VideoUrl = ag.Options.VideoUrl
+	ag.Result.Uploader = metadata.Uploader
+	ag.Result.UploaderUrl = metadata.UploaderURL
+	ag.Result.Description = metadata.Description
+	ag.Result.Tags = metadata.Tags
+	ag.Result.Categories = metadata.Categories
 
 	//Parse Transcript
 	srtContent, err := ag.BucketStore.GetFileAsString(ctx, transcriptKey)
@@ -285,11 +299,7 @@ func (ag *ArticleGenerator) ExecutePhaseGeneration() error {
 	var err error
 	if ag.Options.ChaptersAsSections && len(ag.Video.Metadata.Chapters) > 0 {
 		starts := ytdlp.GetChapterStartTimes(ag.Video.Metadata.Chapters)
-		fmt.Println(starts)
 		sectionIds := ag.Video.SRT.MapTimesToSections(starts)
-		fmt.Println(sectionIds)
-		fmt.Println(len(sectionIds))
-		fmt.Println(len(ag.Video.Metadata.Chapters))
 		for i, chapter := range ag.Video.Metadata.Chapters {
 			segmentsPhase.Segments = append(segmentsPhase.Segments, &aiservice.Segment{
 				Start: sectionIds[i],
@@ -398,38 +408,4 @@ func (ag *ArticleGenerator) ProgressPrinter() {
 			}
 		}
 	}()
-}
-
-type ArticleResult struct {
-	Title     string
-	Thumbnail string
-	Sections  []ArticleSection
-	Images    []ArticleImage
-}
-
-type ArticleImage struct {
-	URL          string
-	Caption      string
-	SectionIndex int
-}
-
-type ArticleSection struct {
-	Title   string
-	Content string
-}
-
-func (ar *ArticleResult) HTML(w io.Writer) error {
-	tmpl, err := template.ParseFiles("templates/article.html")
-	if err != nil {
-		return fmt.Errorf("failed to parse template: %w", err)
-	}
-	return tmpl.ExecuteTemplate(w, "article", ar)
-}
-
-func (ar *ArticleResult) PrefixForBasicGeneration() string {
-	return fmt.Sprintf(`
-<h1 class="ql-align-center" >%s</h1>
-<br>
-<img src="%s" alt="%s">
-<br>`, ar.Title, ar.Thumbnail, ar.Title)
 }

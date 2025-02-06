@@ -54,7 +54,7 @@ func (viddler *Viddler) generateHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	fmt.Println(options)
+	fmt.Printf("%+v\n", options)
 	params := generator.ArticleGeneratorParams{
 		Config:      viddler.Config.ArticleGenerator,
 		BucketStore: viddler.BucketStore,
@@ -69,6 +69,8 @@ func (viddler *Viddler) generateHandler(w http.ResponseWriter, r *http.Request) 
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
+	fmt.Print("\n\n", article, "\n\n")
+
 	json.NewEncoder(w).Encode(map[string]string{"article": article})
 }
 
