@@ -21,11 +21,12 @@ type OpenAiCompatibleClient struct {
 }
 
 var openAiModels = map[string]OpenAiModelWithFeatures{
-	"GPT-4o Mini": {Model: openai.ChatModelGPT4oMini, Features: ModelFeatures{StructuredOutputs: true}},
-	"GPT-4o":      {Model: openai.ChatModelGPT4o, Features: ModelFeatures{StructuredOutputs: true}},
-	"o1-mini":     {Model: openai.ChatModelO1Mini, Features: ModelFeatures{StructuredOutputs: false}},
-	//"o1":            {Model: openai.ChatModelO1, Features: ModelFeatures{StructuredOutputs: false}},
-	//"o1-2024-12-17": {Model: openai.ChatModelO1_2024_12_17, Features: ModelFeatures{StructuredOutputs: true}},
+	"GPT-4o Mini":   {Model: openai.ChatModelGPT4oMini, Features: ModelFeatures{StructuredOutputs: true}},
+	"GPT-4o":        {Model: openai.ChatModelGPT4o, Features: ModelFeatures{StructuredOutputs: true}},
+	"o1-mini":       {Model: openai.ChatModelO1Mini, Features: ModelFeatures{StructuredOutputs: false}},
+	"o1":            {Model: openai.ChatModelO1, Features: ModelFeatures{StructuredOutputs: false}},
+	"o1-2024-12-17": {Model: openai.ChatModelO1_2024_12_17, Features: ModelFeatures{StructuredOutputs: true}},
+	"o3-mini":       {Model: openai.ChatModelO3Mini, Features: ModelFeatures{StructuredOutputs: true}},
 }
 
 type OpenAiModelWithFeatures struct {
