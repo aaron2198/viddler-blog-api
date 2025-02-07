@@ -32,5 +32,6 @@ WORKDIR /root/
 
 # Copy binary from builder
 COPY --from=builder /app/viddler-server .
+COPY --from=builder /app/templates ./templates
 
 CMD ["./viddler-server"]
