@@ -20,7 +20,7 @@ func (viddler *Viddler) Server(port int) {
 	mux.HandleFunc("/api/generate", corsMiddleware(viddler.generateHandler))
 	mux.HandleFunc("/api/phaseoptions", corsMiddleware(phaseOptionsHandler))
 	mux.HandleFunc("/api/clientoptions", corsMiddleware(viddler.clientOptionsHandler))
-
+	mux.HandleFunc("/api/generatemodes", corsMiddleware(viddler.generateModesHandler))
 	server := http.Server{
 		Addr:    fmt.Sprintf(":%d", port),
 		Handler: mux,
@@ -113,4 +113,14 @@ func (viddler *Viddler) clientOptionsHandler(w http.ResponseWriter, r *http.Requ
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(aiservice.ModelOptions())
+}
+
+func (viddler *Viddler) generateModesHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode([]generator.GenerateMode{generator.BasicGenerate, generator.VideoBasedGenerate, generator.PhaseBasedGenerate})
 }

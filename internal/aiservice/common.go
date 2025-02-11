@@ -34,8 +34,8 @@ const (
 
 func ModelsForClient(client string, features ...ModelFeature) []string {
 	switch client {
-	case "gemini":
-		return GeminiModels(features...)
+	case "google":
+		return VertexAiModels(features...)
 	case "openai":
 		return OpenAiModels(features...)
 	case "ollama":

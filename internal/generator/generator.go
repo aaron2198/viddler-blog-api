@@ -14,6 +14,14 @@ import (
 	"gitlab.aaronhess.xyz/viddler/viddler-blog-api/internal/ytdlp"
 )
 
+type GenerateMode string
+
+const (
+	BasicGenerate      GenerateMode = "basic"
+	VideoBasedGenerate GenerateMode = "video"
+	PhaseBasedGenerate GenerateMode = "phase"
+)
+
 type UserProvidedOptions struct {
 	Initialized          bool
 	VideoUrl             string
@@ -21,7 +29,7 @@ type UserProvidedOptions struct {
 	Client               string
 	Model                string
 	ChaptersAsSections   bool
-	EnablePhases         bool
+	Mode                 GenerateMode
 	EmbedVideo           bool
 	IncludeDescription   bool
 	IncludeTags          bool
@@ -49,7 +57,9 @@ type Video struct {
 
 type ArticleGeneratorConfig struct {
 	OpenAiAPIKey        string
-	GeminiAPIKey        string
+	VertexAPIKey        string
+	VertexProject       string
+	VertexLocation      string
 	OllamaAPIKey        string
 	AnthropicAPIKey     string
 	OllamaEndpoint      string
@@ -60,8 +70,8 @@ type ArticleGeneratorConfig struct {
 }
 
 var DefaultPhases = aiservice.TemplatePhaseMap{
-	"segments": aiservice.ClientTemplate{Client: "gemini", Model: "Gemini 2.0 Flash", UserPrompt: "Use this transcript to identify sections for an article, read the entire transcript and determine at most 10 sections to refine the content into. Each section has a 'sectionID: number', use this number to indicate the beginning of a section and sections should be in order. Each section should have an accurate title. Respond with the provided JSON schema. transcript: "},
-	"content":  aiservice.ClientTemplate{Client: "gemini", Model: "Gemini 2.0 Flash", UserPrompt: "Using the provided dialigue, create paragraph summarizing it in the form of an article. This is one piece of a larger article and will be combined with other sections to form a full article so do not mention lack of context from previous sections. Avoid terms like 'this section' or 'this section is about': "},
+	"segments": aiservice.ClientTemplate{Client: "google", Model: "Gemini 2.0 Flash", UserPrompt: "Use this transcript to identify sections for an article, read the entire transcript and determine at most 10 sections to refine the content into. Each section has a 'sectionID: number', use this number to indicate the beginning of a section and sections should be in order. Each section should have an accurate title. Respond with the provided JSON schema. transcript: "},
+	"content":  aiservice.ClientTemplate{Client: "google", Model: "Gemini 2.0 Flash", UserPrompt: "Using the provided dialigue, create paragraph summarizing it in the form of an article. This is one piece of a larger article and will be combined with other sections to form a full article so do not mention lack of context from previous sections. Avoid terms like 'this section' or 'this section is about': "},
 	"refine":   aiservice.ClientTemplate{Client: "openai", Model: "GPT-4o Mini", UserPrompt: "The users prompt is a article. Please refine the article to be more concise and coherent. Each section should have an accurate title and updated content. If a section is not relavent to the article it can be removed or combined with another section. Respond with the provided JSON schema. article: "},
 }
 
@@ -108,10 +118,12 @@ func (ag *ArticleGenerator) WithCustomPhases(template aiservice.TemplatePhaseMap
 
 func (ag *ArticleGenerator) GetClient(client, model string) aiservice.Client {
 	switch client {
-	case "gemini":
-		return aiservice.NewGeminiClient(aiservice.GeminiClientParams{
-			Key:   ag.Config.GeminiAPIKey,
-			Model: model,
+	case "google":
+		return aiservice.NewVertexAiClient(aiservice.VertexAiClientParams{
+			Key:      ag.Config.VertexAPIKey,
+			Project:  ag.Config.VertexProject,
+			Location: ag.Config.VertexLocation,
+			Model:    model,
 		})
 	case "openai":
 		return aiservice.NewOpenAiClient(aiservice.OpenAiClientParams{
@@ -145,17 +157,9 @@ func (ag *ArticleGenerator) GenerateArticle() (html string, err error) {
 	}
 
 	var buf bytes.Buffer
-	if ag.Options.EnablePhases {
-		if err := ag.ExecutePhaseGeneration(); err != nil {
-			ag.Complete <- struct{}{}
-			return "", fmt.Errorf("failed to generate AI content: %w", err)
-		}
-		if err := ag.Result.HTML("phase_article", &buf); err != nil {
-			ag.Complete <- struct{}{}
-			return "", fmt.Errorf("failed to generate HTML: %w", err)
-		}
-		ag.Complete <- struct{}{}
-	} else {
+
+	switch ag.Options.Mode {
+	case BasicGenerate:
 		content, err := ag.ExecuteBasicGeneration()
 		if err != nil {
 			ag.Complete <- struct{}{}
@@ -167,7 +171,29 @@ func (ag *ArticleGenerator) GenerateArticle() (html string, err error) {
 			ag.Complete <- struct{}{}
 			return "", fmt.Errorf("failed to generate HTML: %w", err)
 		}
+	case VideoBasedGenerate:
+		content, err := ag.ExecuteVideoBasedGeneration()
+		if err != nil {
+			ag.Complete <- struct{}{}
+			return "", fmt.Errorf("failed to generate AI content: %w", err)
+		}
+		ag.Result.Body = content
+		err = ag.Result.HTML("basic_article", &buf)
+		if err != nil {
+			ag.Complete <- struct{}{}
+			return "", fmt.Errorf("failed to generate HTML: %w", err)
+		}
+	case PhaseBasedGenerate:
+		if err := ag.ExecutePhaseGeneration(); err != nil {
+			ag.Complete <- struct{}{}
+			return "", fmt.Errorf("failed to generate AI content: %w", err)
+		}
+		if err := ag.Result.HTML("phase_article", &buf); err != nil {
+			ag.Complete <- struct{}{}
+			return "", fmt.Errorf("failed to generate HTML: %w", err)
+		}
 	}
+	ag.Complete <- struct{}{}
 	return buf.String(), nil
 }
 
@@ -292,6 +318,23 @@ func (ag *ArticleGenerator) ExecuteBasicGeneration() (string, error) {
 		return "", fmt.Errorf("failed to generate content: %s", err)
 	}
 	return MarkdownToHTML(content), nil
+}
+
+func (ag *ArticleGenerator) ExecuteVideoBasedGeneration() (string, error) {
+	client := aiservice.NewVertexAiClient(aiservice.VertexAiClientParams{
+		Key:      "",
+		Project:  ag.Config.VertexProject,
+		Location: ag.Config.VertexLocation,
+		Model:    "Gemini 2.0 Flash",
+	})
+	if client == nil {
+		return "", fmt.Errorf("failed to get client: %s", "Vertex AI")
+	}
+	resp, err := client.SpecialVideoPrompt(ag.Options.VideoUrl, ag.Options.UserStylePrompt)
+	if err != nil {
+		return "", fmt.Errorf("failed to generate content: %s", err)
+	}
+	return MarkdownToHTML(resp), nil
 }
 
 func (ag *ArticleGenerator) ExecutePhaseGeneration() error {
