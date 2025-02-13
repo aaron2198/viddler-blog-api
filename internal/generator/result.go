@@ -1,9 +1,9 @@
 package generator
 
 import (
+	"bytes"
 	"fmt"
 	"html/template"
-	"io"
 )
 
 type ArticleResult struct {
@@ -20,6 +20,7 @@ type ArticleResult struct {
 	Sections    []ArticleSection
 	Images      []ArticleImage
 	Body        string
+	HTML        string
 }
 
 type ArticleImage struct {
@@ -33,12 +34,23 @@ type ArticleSection struct {
 	Content string
 }
 
-func (ar *ArticleResult) HTML(style string, w io.Writer) error {
+func (ar *ArticleResult) html() error {
 	tmpl, err := template.ParseFiles("templates/article.html")
 	if err != nil {
 		return fmt.Errorf("failed to parse template: %w", err)
 	}
-	return tmpl.ExecuteTemplate(w, style, ar)
+	style := "basic_article"
+	if ar.Options.Mode == PhaseBasedGenerate {
+		style = "phase_article"
+	}
+	buf := bytes.Buffer{}
+
+	err = tmpl.ExecuteTemplate(&buf, style, ar)
+	if err != nil {
+		return fmt.Errorf("failed to generate article html: %w", err)
+	}
+	ar.HTML = buf.String()
+	return nil
 }
 
 func (ar *ArticleResult) RawBody() template.HTML {

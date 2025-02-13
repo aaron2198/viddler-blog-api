@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 
 	"gitlab.aaronhess.xyz/viddler/viddler-blog-api/internal/aiservice"
 	"gitlab.aaronhess.xyz/viddler/viddler-blog-api/internal/generator"
@@ -18,9 +19,11 @@ func (viddler *Viddler) Server(port int) {
 	signal.Notify(kill, os.Interrupt)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/generate", corsMiddleware(viddler.generateHandler))
+	mux.HandleFunc("/api/article", corsMiddleware(viddler.GetArticleHandler))
 	mux.HandleFunc("/api/phaseoptions", corsMiddleware(phaseOptionsHandler))
 	mux.HandleFunc("/api/clientoptions", corsMiddleware(viddler.clientOptionsHandler))
 	mux.HandleFunc("/api/generatemodes", corsMiddleware(viddler.generateModesHandler))
+
 	server := http.Server{
 		Addr:    fmt.Sprintf(":%d", port),
 		Handler: mux,
@@ -35,6 +38,12 @@ func (viddler *Viddler) Server(port int) {
 	<-kill
 	fmt.Println("Shutting down...")
 	server.Shutdown(context.Background())
+}
+
+type GenerateResponse struct {
+	*generator.ArticleResult
+	Id     int
+	Errors []string
 }
 
 func (viddler *Viddler) generateHandler(w http.ResponseWriter, r *http.Request) {
@@ -54,7 +63,6 @@ func (viddler *Viddler) generateHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	fmt.Printf("%+v\n", options)
 	params := generator.ArticleGeneratorParams{
 		Config:      viddler.Config.ArticleGenerator,
 		BucketStore: viddler.BucketStore,
@@ -67,11 +75,20 @@ func (viddler *Viddler) generateHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	response := GenerateResponse{
+		ArticleResult: article,
+		Id:            0,
+		Errors:        []string{},
+	}
+
+	response.Id, err = viddler.StoreArticle(r.Context(), &options, article)
+	if err != nil {
+		response.Errors = append(response.Errors, fmt.Sprintf("Failed to store article: %s", err))
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	fmt.Print("\n\n", article, "\n\n")
-
-	json.NewEncoder(w).Encode(map[string]string{"article": article})
+	json.NewEncoder(w).Encode(response)
 }
 
 type PhaseOptions struct {
@@ -123,4 +140,30 @@ func (viddler *Viddler) generateModesHandler(w http.ResponseWriter, r *http.Requ
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode([]generator.GenerateMode{generator.BasicGenerate, generator.VideoBasedGenerate, generator.PhaseBasedGenerate})
+}
+
+func (viddler *Viddler) GetArticleHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	id, err := strconv.Atoi(r.URL.Query().Get("id"))
+	if err != nil {
+		http.Error(w, "Invalid ID", http.StatusBadRequest)
+		return
+	}
+	article, err := viddler.GetArticle(r.Context(), id)
+	if err != nil {
+		msg := fmt.Sprintf("Failed to get article: %s", err)
+		http.Error(w, msg, http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html")
+	w.WriteHeader(http.StatusOK)
+	res := GenerateResponse{
+		ArticleResult: article,
+		Id:            id,
+		Errors:        []string{},
+	}
+	json.NewEncoder(w).Encode(res)
 }

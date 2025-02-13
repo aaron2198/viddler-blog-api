@@ -4,12 +4,14 @@ import (
 	"os"
 
 	"gitlab.aaronhess.xyz/viddler/viddler-blog-api/internal/bucket"
+	"gitlab.aaronhess.xyz/viddler/viddler-blog-api/internal/db"
 	"gitlab.aaronhess.xyz/viddler/viddler-blog-api/internal/generator"
 )
 
 type Config struct {
 	Domain              string
-	BucketStore         bucket.BucketStoreConfig
+	BucketStore         *bucket.BucketStoreConfig
+	DB                  *db.DBConfig
 	ArticleGenerator    *generator.ArticleGeneratorConfig
 	GeneratedImagesPath string
 }
@@ -17,12 +19,15 @@ type Config struct {
 func New() *Config {
 	return &Config{
 		Domain: os.Getenv("DOMAIN"),
-		BucketStore: bucket.BucketStoreConfig{
+		BucketStore: &bucket.BucketStoreConfig{
 			Type:      os.Getenv("BUCKET_STORE_TYPE"),
 			Endpoint:  os.Getenv("BUCKET_STORE_ENDPOINT"),
 			AccessKey: os.Getenv("BUCKET_STORE_ACCESS_KEY"),
 			SecretKey: os.Getenv("BUCKET_STORE_SECRET_KEY"),
 			Bucket:    os.Getenv("BUCKET_STORE_BUCKET"),
+		},
+		DB: &db.DBConfig{
+			DSN: os.Getenv("DB_DSN"),
 		},
 		GeneratedImagesPath: orDefaultString("GENERATED_IMAGES_PATH", "generated-images/"),
 		ArticleGenerator: &generator.ArticleGeneratorConfig{

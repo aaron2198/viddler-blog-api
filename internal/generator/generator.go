@@ -1,7 +1,6 @@
 package generator
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -145,56 +144,45 @@ func (ag *ArticleGenerator) GetClient(client, model string) aiservice.Client {
 	return nil
 }
 
-func (ag *ArticleGenerator) GenerateArticle() (html string, err error) {
+func (ag *ArticleGenerator) GenerateArticle() (*ArticleResult, error) {
+	var err error
 	ag.Video.Id, err = ytdlp.ParseVideoID(ag.Options.VideoUrl)
 	if err != nil {
-		return "", fmt.Errorf("failed to parse video ID: %s", err)
+		return nil, fmt.Errorf("failed to parse video ID: %s", err)
 	}
 
 	if err := ag.Setup(); err != nil {
 		ag.Complete <- struct{}{}
-		return "", err
+		return nil, err
 	}
-
-	var buf bytes.Buffer
 
 	switch ag.Options.Mode {
 	case BasicGenerate:
 		content, err := ag.ExecuteBasicGeneration()
 		if err != nil {
 			ag.Complete <- struct{}{}
-			return "", fmt.Errorf("failed to generate AI content: %w", err)
+			return nil, fmt.Errorf("failed to generate AI content: %w", err)
 		}
 		ag.Result.Body = content
-		err = ag.Result.HTML("basic_article", &buf)
-		if err != nil {
-			ag.Complete <- struct{}{}
-			return "", fmt.Errorf("failed to generate HTML: %w", err)
-		}
 	case VideoBasedGenerate:
 		content, err := ag.ExecuteVideoBasedGeneration()
 		if err != nil {
 			ag.Complete <- struct{}{}
-			return "", fmt.Errorf("failed to generate AI content: %w", err)
+			return nil, fmt.Errorf("failed to generate AI content: %w", err)
 		}
 		ag.Result.Body = content
-		err = ag.Result.HTML("basic_article", &buf)
-		if err != nil {
-			ag.Complete <- struct{}{}
-			return "", fmt.Errorf("failed to generate HTML: %w", err)
-		}
 	case PhaseBasedGenerate:
 		if err := ag.ExecutePhaseGeneration(); err != nil {
 			ag.Complete <- struct{}{}
-			return "", fmt.Errorf("failed to generate AI content: %w", err)
-		}
-		if err := ag.Result.HTML("phase_article", &buf); err != nil {
-			ag.Complete <- struct{}{}
-			return "", fmt.Errorf("failed to generate HTML: %w", err)
+			return nil, fmt.Errorf("failed to generate AI content: %w", err)
 		}
 	}
+	if err := ag.Result.html(); err != nil {
+		ag.Complete <- struct{}{}
+		return nil, fmt.Errorf("failed to generate HTML: %w", err)
+	}
 	ag.Complete <- struct{}{}
-	return buf.String(), nil
+	return ag.Result, nil
 }
 
 func (ag *ArticleGenerator) StoreTranscript(ctx context.Context) (key string, err error) {

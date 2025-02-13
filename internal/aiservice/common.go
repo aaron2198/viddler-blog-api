@@ -23,7 +23,7 @@ type ClientTemplate struct {
 	UserPrompt string `json:"userPrompt"`
 }
 
-var AvailableClients = []string{"gemini", "openai", "ollama", "anthropic"}
+var AvailableClients = []string{"google", "openai", "ollama", "anthropic"}
 
 type ModelFeature string
 
