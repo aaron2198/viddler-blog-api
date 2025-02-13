@@ -10,7 +10,6 @@ import (
 	"cloud.google.com/go/vertexai/genai"
 	"github.com/googleapis/gax-go/v2/apierror"
 	"gitlab.aaronhess.xyz/viddler/viddler-blog-api/internal/srt"
-	"google.golang.org/api/option"
 )
 
 var vertexAiModels = map[string]VertexAiModelWithFeatures{
@@ -53,11 +52,7 @@ type VertexAiClient struct {
 }
 
 func NewVertexAiClient(params VertexAiClientParams) *VertexAiClient {
-	var opts []option.ClientOption
-	if params.Key != "" {
-		opts = append(opts, option.WithAPIKey(params.Key))
-	}
-	client, err := genai.NewClient(context.Background(), params.Project, params.Location, opts...)
+	client, err := genai.NewClient(context.Background(), params.Project, params.Location)
 	if err != nil {
 		fmt.Println("failed to create vertex ai client", err)
 		return nil
