@@ -129,3 +129,17 @@ func (ac *AnthropicClient) RefinePhase(prompt, article string) (*RefinePhase, er
 	}
 	return refine, nil
 }
+
+func (ac *AnthropicClient) GenericPrompt(prompt string) (string, error) {
+	message, err := ac.Client.Messages.New(context.TODO(), anthropic.MessageNewParams{
+		Model:     anthropic.F(ac.Model),
+		MaxTokens: anthropic.F(int64(1024)),
+		Messages: anthropic.F([]anthropic.MessageParam{
+			anthropic.NewUserMessage(anthropic.NewTextBlock(prompt)),
+		}),
+	})
+	if err != nil {
+		return "", err
+	}
+	return message.Content[0].Text, nil
+}

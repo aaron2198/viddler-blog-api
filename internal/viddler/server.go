@@ -23,6 +23,8 @@ func (viddler *Viddler) Server(port int) {
 	mux.HandleFunc("/api/phaseoptions", corsMiddleware(phaseOptionsHandler))
 	mux.HandleFunc("/api/clientoptions", corsMiddleware(viddler.clientOptionsHandler))
 	mux.HandleFunc("/api/generatemodes", corsMiddleware(viddler.generateModesHandler))
+	mux.HandleFunc("/api/contenttypes", corsMiddleware(viddler.contentTypesHandler))
+	mux.HandleFunc("/api/modelsforprompt", corsMiddleware(viddler.modelsForPrompt))
 
 	server := http.Server{
 		Addr:    fmt.Sprintf(":%d", port),
@@ -109,11 +111,11 @@ func phaseOptionsHandler(w http.ResponseWriter, r *http.Request) {
 
 	phaseOptions := PhaseOptions{}
 
-	for _, availablePhase := range aiservice.PhaseOrder {
+	for _, phase := range generator.PhaseOrder {
 		phaseOptions.Phases = append(phaseOptions.Phases, PhaseOption{
-			Name:        availablePhase,
-			Description: aiservice.AvailablePhases[availablePhase],
-			Clients:     aiservice.ModelOptions(aiservice.StructuredOutputs, aiservice.PsuedoStructuredOutputs),
+			Name:        string(phase),
+			Description: generator.AvailablePhases[phase],
+			Clients:     aiservice.ModelOptions(generator.PromptRequirements[phase]...),
 		})
 	}
 
@@ -140,6 +142,52 @@ func (viddler *Viddler) generateModesHandler(w http.ResponseWriter, r *http.Requ
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode([]generator.GenerateMode{generator.BasicGenerate, generator.VideoBasedGenerate, generator.PhaseBasedGenerate})
+}
+
+func (viddelr *Viddler) contentTypesHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(generator.ContentTypes())
+}
+
+type ModelsForPromptRequest struct {
+	Prompt generator.PromptStep `json:"prompt"`
+}
+
+type ModelsForPromptResponse struct {
+	Options map[string][]string `json:"options"`
+}
+
+// Allow frontend to dynamically build selector for different kinds of supported prompts with different matrices of models
+func (viddler *Viddler) modelsForPrompt(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var request ModelsForPromptRequest
+	err := json.NewDecoder(r.Body).Decode(&request)
+	if err != nil {
+		http.Error(w, "Failed to decode request", http.StatusBadRequest)
+		return
+	}
+	response := ModelsForPromptResponse{
+		Options: make(map[string][]string),
+	}
+	for _, client := range aiservice.AvailableClients {
+		models := aiservice.ModelsForClient(client, generator.PromptRequirements[request.Prompt]...)
+		if len(models) > 0 {
+			response.Options[client] = models
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(response)
 }
 
 func (viddler *Viddler) GetArticleHandler(w http.ResponseWriter, r *http.Request) {

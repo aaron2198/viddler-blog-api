@@ -13,9 +13,10 @@ import (
 )
 
 var vertexAiModels = map[string]VertexAiModelWithFeatures{
-	"Gemini 2.0 Flash": {Model: "gemini-2.0-flash-exp", Features: ModelFeatures{StructuredOutputs: true}},
-	"Gemini 1.5 Pro":   {Model: "gemini-1.5-pro-exp", Features: ModelFeatures{StructuredOutputs: true}},
-	"Gemini 1.5 Flash": {Model: "gemini-1.5-flash-exp", Features: ModelFeatures{StructuredOutputs: true}},
+	"Gemini 2.0 Flash":     {Model: "gemini-2.0-flash-exp", Features: ModelFeatures{StructuredOutputs: true, DirectVideoInput: true}},
+	"Gemini 1.5 Pro":       {Model: "gemini-1.5-pro-exp", Features: ModelFeatures{StructuredOutputs: true, DirectVideoInput: true}},
+	"Gemini 1.5 Flash":     {Model: "gemini-1.5-flash-exp", Features: ModelFeatures{StructuredOutputs: true, DirectVideoInput: true}},
+	"Gemini 2.0 Pro 02-05": {Model: "gemini-2.0-pro-exp-02-05", Features: ModelFeatures{StructuredOutputs: true, DirectVideoInput: true}},
 }
 
 type VertexAiModelWithFeatures struct {
@@ -232,6 +233,16 @@ func (vc *VertexAiClient) SpecialVideoPrompt(url, prompt string) (string, error)
 		FileURI:  url,
 		MIMEType: "video/webm",
 	})
+	if err != nil {
+		return "", err
+	}
+	return string(resp.Candidates[0].Content.Parts[0].(genai.Text)), nil
+}
+
+func (vc *VertexAiClient) GenericPrompt(prompt string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	defer cancel()
+	resp, err := vc.throttleGenerateContent(ctx, genai.Text(prompt))
 	if err != nil {
 		return "", err
 	}

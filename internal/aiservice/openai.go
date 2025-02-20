@@ -185,3 +185,16 @@ func (oa *OpenAiClient) RefinePhase(prompt, article string) (*RefinePhase, error
 	_ = json.Unmarshal([]byte(chat.Choices[0].Message.Content), &openAiRefine)
 	return &openAiRefine, nil
 }
+
+func (oa *OpenAiClient) GenericPrompt(prompt string) (string, error) {
+	chat, err := oa.Client.Chat.Completions.New(context.TODO(), openai.ChatCompletionNewParams{
+		Model: openai.F(oa.Model),
+		Messages: openai.F([]openai.ChatCompletionMessageParamUnion{
+			openai.UserMessage(prompt),
+		}),
+	})
+	if err != nil {
+		return "", err
+	}
+	return chat.Choices[0].Message.Content, nil
+}
