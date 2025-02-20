@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"sync"
 
 	"gitlab.aaronhess.xyz/viddler/viddler-blog-api/internal/aiservice"
@@ -21,6 +20,33 @@ const (
 	PhaseBasedGenerate GenerateMode = "phase"
 )
 
+type PromptStep string
+
+const (
+	BasicPrompt        PromptStep = "basic"
+	VideoPrompt        PromptStep = "video"
+	PhaseSegmentPrompt PromptStep = "segment"
+	PhaseContentPrompt PromptStep = "content"
+	PhaseRefinePrompt  PromptStep = "refine"
+)
+
+type PromptRequirementsMap map[PromptStep][]aiservice.ModelFeature
+
+var PromptRequirements = PromptRequirementsMap{
+	BasicPrompt:        []aiservice.ModelFeature{},
+	VideoPrompt:        []aiservice.ModelFeature{aiservice.DirectVideoInput},
+	PhaseSegmentPrompt: []aiservice.ModelFeature{aiservice.PsuedoStructuredOutputs, aiservice.StructuredOutputs},
+	PhaseContentPrompt: []aiservice.ModelFeature{},
+	PhaseRefinePrompt:  []aiservice.ModelFeature{aiservice.PsuedoStructuredOutputs, aiservice.StructuredOutputs},
+}
+
+var PhaseOrder = []PromptStep{PhaseSegmentPrompt, PhaseContentPrompt, PhaseRefinePrompt}
+var AvailablePhases = map[PromptStep]string{
+	PhaseSegmentPrompt: "Break the video into segments that separate ideas.",
+	PhaseContentPrompt: "Use an excerpt of the transcript to create article content.",
+	PhaseRefinePrompt:  "Refine the article content to make it more coherent and engaging.",
+}
+
 type UserProvidedOptions struct {
 	Initialized          bool
 	VideoUrl             string
@@ -32,9 +58,11 @@ type UserProvidedOptions struct {
 	EmbedVideo           bool
 	IncludeDescription   bool
 	IncludeTags          bool
+	OutputType           OutputType
 	SelectedPhaseOptions aiservice.TemplatePhaseMap
 }
 
+// TODO: change name to Generator, generates all types of content
 type ArticleGenerator struct {
 	Config               *ArticleGeneratorConfig
 	BucketStore          *bucket.BucketStore
@@ -104,12 +132,12 @@ func New(params *ArticleGeneratorParams) *ArticleGenerator {
 }
 
 func (ag *ArticleGenerator) WithCustomPhases(template aiservice.TemplatePhaseMap) *ArticleGenerator {
-	for _, phase := range aiservice.PhaseOrder {
-		client := template[phase].Client
-		model := template[phase].Model
+	for _, phase := range PhaseOrder {
+		client := template[string(phase)].Client
+		model := template[string(phase)].Model
 		aiclient := ag.GetClient(client, model)
 		if aiclient != nil {
-			ag.Phases[phase] = aiclient
+			ag.Phases[string(phase)] = aiclient
 		}
 	}
 	return ag
@@ -290,17 +318,7 @@ func (ag *ArticleGenerator) ExecuteBasicGeneration() (string, error) {
 	if client == nil {
 		return "", fmt.Errorf("failed to get client: %s", ag.Options.Client)
 	}
-	if ag.Options.UserStylePrompt == "" {
-		ag.Options.UserStylePrompt = "generate an article based on the following transcript:\n"
-	}
-	prefix := strings.Builder{}
-	if ag.Options.ChaptersAsSections && len(ag.Video.Metadata.Chapters) > 0 {
-		prefix.WriteString("Use the following list as section titles for an article:\n")
-		for _, chapter := range ag.Video.Metadata.Chapters {
-			prefix.WriteString(fmt.Sprintf("%s\n", chapter.Title))
-		}
-	}
-	prompt := prefix.String() + ag.Options.UserStylePrompt
+	prompt := fmt.Sprintf("%s %s\n", PromptFor(ag.Options.OutputType), ag.Options.UserStylePrompt)
 	content, err := client.BasicGenerate(prompt, ag.Video.SRT.String())
 	if err != nil {
 		return "", fmt.Errorf("failed to generate content: %s", err)
@@ -309,11 +327,15 @@ func (ag *ArticleGenerator) ExecuteBasicGeneration() (string, error) {
 }
 
 func (ag *ArticleGenerator) ExecuteVideoBasedGeneration() (string, error) {
+	model := "Gemini 2.0 Flash"
+	if ag.Options.Model != "" {
+		model = ag.Options.Model
+	}
 	client := aiservice.NewVertexAiClient(aiservice.VertexAiClientParams{
 		Key:      "",
 		Project:  ag.Config.VertexProject,
 		Location: ag.Config.VertexLocation,
-		Model:    "Gemini 2.0 Flash",
+		Model:    model,
 	})
 	if client == nil {
 		return "", fmt.Errorf("failed to get client: %s", "Vertex AI")

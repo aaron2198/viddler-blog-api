@@ -8,6 +8,7 @@ type ModelFeatures map[ModelFeature]bool
 
 type Client interface {
 	String() string
+	GenericPrompt(prompt string) (string, error)
 	BasicGenerate(prompt, dialogue string) (string, error)
 	ArticleSegmentsPhase(propmpt string, srt *srt.SRT) (*SegmentsPhase, error)
 	SegmentContentPhase(prompt, dialogue string) (string, error)
@@ -30,6 +31,7 @@ type ModelFeature string
 const (
 	PsuedoStructuredOutputs ModelFeature = "psuedo_structured_outputs"
 	StructuredOutputs       ModelFeature = "structured_outputs"
+	DirectVideoInput        ModelFeature = "direct_video_input"
 )
 
 func ModelsForClient(client string, features ...ModelFeature) []string {
@@ -52,11 +54,4 @@ func ModelOptions(features ...ModelFeature) map[string][]string {
 		modelOptions[client] = ModelsForClient(client, features...)
 	}
 	return modelOptions
-}
-
-var PhaseOrder = []string{"segments", "content", "refine"}
-var AvailablePhases = map[string]string{
-	"segments": "Break the video into segments that separate ideas.",
-	"content":  "Use an excerpt of the transcript to create article content.",
-	"refine":   "Refine the article content to make it more coherent and engaging.",
 }
