@@ -20,6 +20,7 @@ func (viddler *Viddler) Server(port int) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/generate", corsMiddleware(viddler.generateHandler))
 	mux.HandleFunc("/api/article", corsMiddleware(viddler.GetArticleHandler))
+	mux.HandleFunc("/api/queue", corsMiddleware(viddler.QueueArticleHandler))
 	mux.HandleFunc("/api/phaseoptions", corsMiddleware(phaseOptionsHandler))
 	mux.HandleFunc("/api/clientoptions", corsMiddleware(viddler.clientOptionsHandler))
 	mux.HandleFunc("/api/generatemodes", corsMiddleware(viddler.generateModesHandler))
@@ -61,6 +62,7 @@ func (viddler *Viddler) generateHandler(w http.ResponseWriter, r *http.Request) 
 	var options generator.UserProvidedOptions
 	err := json.NewDecoder(r.Body).Decode(&options)
 	if err != nil {
+		fmt.Println(err)
 		http.Error(w, "Failed to decode options", http.StatusBadRequest)
 		return
 	}
@@ -214,4 +216,37 @@ func (viddler *Viddler) GetArticleHandler(w http.ResponseWriter, r *http.Request
 		Errors:        []string{},
 	}
 	json.NewEncoder(w).Encode(res)
+}
+
+type QueueArticleRequest struct {
+	Url string `json:"url"`
+}
+
+func (viddler *Viddler) QueueArticleHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var request QueueArticleRequest
+	err := json.NewDecoder(r.Body).Decode(&request)
+	if err != nil {
+		http.Error(w, "Failed to decode request", http.StatusBadRequest)
+		return
+	}
+	g := generator.New(&generator.ArticleGeneratorParams{
+		Config:      viddler.Config.ArticleGenerator,
+		BucketStore: viddler.BucketStore,
+		Options: &generator.UserProvidedOptions{
+			VideoUrl: request.Url,
+		},
+	})
+	queueData, err := g.QueueArticle()
+	if err != nil {
+		http.Error(w, "Failed to queue article: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(queueData)
 }

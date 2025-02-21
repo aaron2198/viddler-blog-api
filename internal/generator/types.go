@@ -29,6 +29,10 @@ func PromptFor(outputType OutputType) string {
 	return fmt.Sprintf("%s %s %s", PrePrompt, prompts[outputType], PostPrompt)
 }
 
+func WithSentence(prompt, sentence string) string {
+	return fmt.Sprintf("%s %s", prompt, sentence)
+}
+
 func ContentTypes() []OutputType {
 	r := []OutputType{}
 	for k := range prompts {

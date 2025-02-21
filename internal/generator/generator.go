@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 
 	"gitlab.aaronhess.xyz/viddler/viddler-blog-api/internal/aiservice"
@@ -59,6 +60,7 @@ type UserProvidedOptions struct {
 	IncludeDescription   bool
 	IncludeTags          bool
 	OutputType           OutputType
+	SEOTerms             []string
 	SelectedPhaseOptions aiservice.TemplatePhaseMap
 }
 
@@ -168,17 +170,48 @@ func (ag *ArticleGenerator) GetClient(client, model string) aiservice.Client {
 			Key:   ag.Config.AnthropicAPIKey,
 			Model: model,
 		})
+	default:
+		return aiservice.NewOpenAiClient(aiservice.OpenAiClientParams{
+			Key:   ag.Config.OpenAiAPIKey,
+			Model: "GPT-4o Mini",
+		})
 	}
-	return nil
+}
+
+type QueueData struct {
+	SEOTerms        []string
+	StyleSuggestion string
+	Metadata        *ArticleResult
+}
+
+func (ag *ArticleGenerator) QueueArticle() (*QueueData, error) {
+	if err := ag.Setup(); err != nil {
+		return nil, err
+	}
+	qd := &QueueData{
+		Metadata: ag.Result,
+	}
+	wg := sync.WaitGroup{}
+	wg.Add(2)
+	go func(ag *ArticleGenerator, qd *QueueData) {
+		fmt.Println(ag.Options.Client, ag.Options.Model)
+		prompt := fmt.Sprintf("Generate a comma separated list of 10 article SEO terms for the following video: titled '%s', with the description '%s', and the following dialogue '%s'.", ag.Result.Title, ag.Result.Description, ag.Video.SRT.String())
+		terms, _ := ag.GetClient(ag.Options.Client, ag.Options.Model).GenericPrompt(prompt)
+		qd.SEOTerms = GenericListParser(terms)
+		wg.Done()
+	}(ag, qd)
+	go func(ag *ArticleGenerator, qd *QueueData) {
+		fmt.Println(ag.Options.Client, ag.Options.Model)
+		prompt := fmt.Sprintf("If you were to write and article for this video, what would be a good style to write it in? Respond exlusively with a one sentence description of a suggested style. Title '%s', with the description '%s', and the following dialogue '%s'.", ag.Result.Title, ag.Result.Description, ag.Video.SRT.String())
+		style, _ := ag.GetClient(ag.Options.Client, ag.Options.Model).GenericPrompt(prompt)
+		qd.StyleSuggestion = style
+		wg.Done()
+	}(ag, qd)
+	wg.Wait()
+	return qd, nil
 }
 
 func (ag *ArticleGenerator) GenerateArticle() (*ArticleResult, error) {
-	var err error
-	ag.Video.Id, err = ytdlp.ParseVideoID(ag.Options.VideoUrl)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse video ID: %s", err)
-	}
-
 	if err := ag.Setup(); err != nil {
 		ag.Complete <- struct{}{}
 		return nil, err
@@ -259,6 +292,12 @@ func (ag *ArticleGenerator) StoreMetadata(ctx context.Context) (key string, err 
 }
 
 func (ag *ArticleGenerator) Setup() error {
+	var err error
+	ag.Video.Id, err = ytdlp.ParseVideoID(ag.Options.VideoUrl)
+	if err != nil {
+		return fmt.Errorf("failed to parse video ID: %s", err)
+	}
+
 	ctx := context.Background()
 	//Get Transcript
 	transcriptKey, err := ag.StoreTranscript(ctx)
@@ -315,10 +354,11 @@ func (ag *ArticleGenerator) Setup() error {
 
 func (ag *ArticleGenerator) ExecuteBasicGeneration() (string, error) {
 	client := ag.GetClient(ag.Options.Client, ag.Options.Model)
-	if client == nil {
-		return "", fmt.Errorf("failed to get client: %s", ag.Options.Client)
+	prompt := WithSentence(PromptFor(ag.Options.OutputType), ag.Options.UserStylePrompt)
+	if len(ag.Options.SEOTerms) > 0 {
+		prompt = WithSentence(prompt, fmt.Sprintf("SEO Terms to include in the article: %s", strings.Join(ag.Options.SEOTerms, ", ")))
 	}
-	prompt := fmt.Sprintf("%s %s\n", PromptFor(ag.Options.OutputType), ag.Options.UserStylePrompt)
+	fmt.Println(prompt)
 	content, err := client.BasicGenerate(prompt, ag.Video.SRT.String())
 	if err != nil {
 		return "", fmt.Errorf("failed to generate content: %s", err)
@@ -340,7 +380,11 @@ func (ag *ArticleGenerator) ExecuteVideoBasedGeneration() (string, error) {
 	if client == nil {
 		return "", fmt.Errorf("failed to get client: %s", "Vertex AI")
 	}
-	resp, err := client.SpecialVideoPrompt(ag.Options.VideoUrl, ag.Options.UserStylePrompt)
+	prompt := WithSentence(PromptFor(ag.Options.OutputType), ag.Options.UserStylePrompt)
+	if len(ag.Options.SEOTerms) > 0 {
+		prompt = WithSentence(prompt, fmt.Sprintf("SEO Terms to include in the article: %s", strings.Join(ag.Options.SEOTerms, ", ")))
+	}
+	resp, err := client.SpecialVideoPrompt(ag.Options.VideoUrl, prompt)
 	if err != nil {
 		return "", fmt.Errorf("failed to generate content: %s", err)
 	}
